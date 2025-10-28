@@ -1,58 +1,86 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, permissions
+from django_filters.rest_framework import DjangoFilterBackend
 
-from cinema.models import Genre, Actor, CinemaHall, Movie, MovieSession
-
+from cinema.models import (
+    Order,
+    Movie,
+    MovieSession,
+    Genre,
+    Actor,
+    CinemaHall,
+)
 from cinema.serializers import (
+    OrderSerializer,
+    OrderCreateSerializer,
+    MovieListSerializer,
+    MovieDetailSerializer,
+    MovieSessionListSerializer,
+    MovieSessionDetailSerializer,
     GenreSerializer,
     ActorSerializer,
     CinemaHallSerializer,
-    MovieSerializer,
-    MovieSessionSerializer,
-    MovieSessionListSerializer,
-    MovieDetailSerializer,
-    MovieSessionDetailSerializer,
-    MovieListSerializer,
 )
+from cinema.filters import MovieFilterSet, MovieSessionFilterSet
 
 
 class GenreViewSet(viewsets.ModelViewSet):
-    queryset = Genre.objects.all()
+    queryset = Genre.objects.all().order_by("id")
     serializer_class = GenreSerializer
+    permission_classes = [permissions.AllowAny]
+    pagination_class = None
 
 
 class ActorViewSet(viewsets.ModelViewSet):
-    queryset = Actor.objects.all()
+    queryset = Actor.objects.all().order_by("id")
     serializer_class = ActorSerializer
+    permission_classes = [permissions.AllowAny]
+    pagination_class = None
 
 
 class CinemaHallViewSet(viewsets.ModelViewSet):
-    queryset = CinemaHall.objects.all()
+    queryset = CinemaHall.objects.all().order_by("id")
     serializer_class = CinemaHallSerializer
+    permission_classes = [permissions.AllowAny]
+    pagination_class = None
+
+
+class OrderViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.AllowAny]
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return OrderCreateSerializer
+        return OrderSerializer
+
+    def get_queryset(self):
+        return Order.objects.filter(user=self.request.user).prefetch_related(
+            "tickets__movie_session"
+        ).order_by("id")
 
 
 class MovieViewSet(viewsets.ModelViewSet):
-    queryset = Movie.objects.all()
-    serializer_class = MovieSerializer
+    queryset = Movie.objects.all().order_by("id")
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = MovieFilterSet
+    permission_classes = [permissions.AllowAny]
+    pagination_class = None
 
     def get_serializer_class(self):
-        if self.action == "list":
-            return MovieListSerializer
-
         if self.action == "retrieve":
             return MovieDetailSerializer
-
-        return MovieSerializer
+        return MovieListSerializer
 
 
 class MovieSessionViewSet(viewsets.ModelViewSet):
-    queryset = MovieSession.objects.all()
-    serializer_class = MovieSessionSerializer
+    queryset = MovieSession.objects.select_related(
+        "movie", "cinema_hall"
+    ).order_by("id")
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = MovieSessionFilterSet
+    permission_classes = [permissions.AllowAny]
+    pagination_class = None
 
     def get_serializer_class(self):
-        if self.action == "list":
-            return MovieSessionListSerializer
-
         if self.action == "retrieve":
             return MovieSessionDetailSerializer
-
-        return MovieSessionSerializer
+        return MovieSessionListSerializer
