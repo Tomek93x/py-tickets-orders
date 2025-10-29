@@ -1,26 +1,20 @@
-from rest_framework import viewsets, permissions
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import permissions, viewsets
 
-from cinema.models import (
-    Order,
-    Movie,
-    MovieSession,
-    Genre,
-    Actor,
-    CinemaHall,
-)
+from cinema.filters import MovieFilterSet, MovieSessionFilterSet
+from cinema.models import Actor, CinemaHall, Genre, Movie, MovieSession, Order
 from cinema.serializers import (
-    OrderSerializer,
-    OrderCreateSerializer,
-    MovieListSerializer,
-    MovieDetailSerializer,
-    MovieSessionListSerializer,
-    MovieSessionDetailSerializer,
-    GenreSerializer,
     ActorSerializer,
     CinemaHallSerializer,
+    GenreSerializer,
+    MovieDetailSerializer,
+    MovieListSerializer,
+    MovieSessionDetailSerializer,
+    MovieSessionListSerializer,
+    MovieSessionSerializer,
+    OrderCreateSerializer,
+    OrderSerializer,
 )
-from cinema.filters import MovieFilterSet, MovieSessionFilterSet
 
 
 class GenreViewSet(viewsets.ModelViewSet):
@@ -53,9 +47,12 @@ class OrderViewSet(viewsets.ModelViewSet):
         return OrderSerializer
 
     def get_queryset(self):
-        return Order.objects.filter(user=self.request.user).prefetch_related(
-            "tickets__movie_session"
-        ).order_by("id")
+        return (
+            Order.objects.filter(user=self.request.user)
+            .prefetch_related("tickets__movie_session__movie")
+            .prefetch_related("tickets__movie_session__cinema_hall")
+            .order_by("id")
+        )
 
 
 class MovieViewSet(viewsets.ModelViewSet):
@@ -73,7 +70,8 @@ class MovieViewSet(viewsets.ModelViewSet):
 
 class MovieSessionViewSet(viewsets.ModelViewSet):
     queryset = MovieSession.objects.select_related(
-        "movie", "cinema_hall"
+        "movie",
+        "cinema_hall",
     ).order_by("id")
     filter_backends = [DjangoFilterBackend]
     filterset_class = MovieSessionFilterSet
@@ -81,6 +79,8 @@ class MovieSessionViewSet(viewsets.ModelViewSet):
     pagination_class = None
 
     def get_serializer_class(self):
+        if self.action == "list":
+            return MovieSessionListSerializer
         if self.action == "retrieve":
             return MovieSessionDetailSerializer
-        return MovieSessionListSerializer
+        return MovieSessionSerializer

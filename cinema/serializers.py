@@ -39,17 +39,13 @@ class MovieSerializer(serializers.ModelSerializer):
     title = serializers.CharField(required=True)
     description = serializers.CharField(required=True)
     duration = serializers.IntegerField(required=True)
-
-    # Write: arrays of integer IDs are required (no empty lists).
-    genres = serializers.PrimaryKeyRelatedField(
-        queryset=Genre.objects.all(),
-        many=True,
+    genres = serializers.ListField(
+        child=serializers.IntegerField(),
         required=True,
         allow_empty=False,
     )
-    actors = serializers.PrimaryKeyRelatedField(
-        queryset=Actor.objects.all(),
-        many=True,
+    actors = serializers.ListField(
+        child=serializers.IntegerField(),
         required=True,
         allow_empty=False,
     )
@@ -65,26 +61,40 @@ class MovieSerializer(serializers.ModelSerializer):
             "actors",
         )
 
+    def create(self, validated_data):
+        genres = validated_data.pop("genres")
+        actors = validated_data.pop("actors")
+        movie = Movie.objects.create(**validated_data)
+        movie.genres.set(genres)
+        movie.actors.set(actors)
+        return movie
+
+    def update(self, instance, validated_data):
+        genres = validated_data.pop("genres", None)
+        actors = validated_data.pop("actors", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if genres is not None:
+            instance.genres.set(genres)
+        if actors is not None:
+            instance.actors.set(actors)
+        instance.save()
+        return instance
+
     def validate(self, attrs):
         errors = {}
-
         if not attrs.get("title"):
             errors["title"] = "This field is required."
         if not attrs.get("description"):
             errors["description"] = "This field is required."
         if attrs.get("duration") in (None, ""):
             errors["duration"] = "This field is required."
-
-        # PrimaryKeyRelatedField with many=True returns model instances.
-        # Enforce non-empty lists and provide explicit error messages.
         if "genres" not in attrs or not attrs["genres"]:
             errors["genres"] = "This field is required."
         if "actors" not in attrs or not attrs["actors"]:
             errors["actors"] = "This field is required."
-
         if errors:
             raise serializers.ValidationError(errors)
-
         return attrs
 
 
@@ -146,34 +156,13 @@ class MovieSessionSerializer(serializers.ModelSerializer):
         model = MovieSession
         fields = ("id", "show_time", "movie", "cinema_hall")
 
-    def validate_movie(self, value):
-        if value is None:
-            raise serializers.ValidationError("This field is required.")
-        return value
-
-    def validate_cinema_hall(self, value):
-        if value is None:
-            raise serializers.ValidationError("This field is required.")
-        return value
-
     def validate_show_time(self, value):
-        # Convert naive datetime to aware if USE_TZ=True.
         if value is not None and timezone.is_naive(value):
             value = timezone.make_aware(
                 value,
                 timezone.get_current_timezone(),
             )
         return value
-
-    def validate(self, attrs):
-        errors = {}
-        if not attrs.get("movie"):
-            errors["movie"] = "This field is required."
-        if not attrs.get("cinema_hall"):
-            errors["cinema_hall"] = "This field is required."
-        if errors:
-            raise serializers.ValidationError(errors)
-        return attrs
 
 
 class MovieSessionListSerializer(serializers.ModelSerializer):
@@ -227,20 +216,16 @@ class MovieSessionDetailSerializer(serializers.ModelSerializer):
             "title": obj.movie.title,
             "description": obj.movie.description,
             "duration": obj.movie.duration,
-            "genres": [
-                genre.name
-                for genre in obj.movie.genres.all()
-            ],
+            "genres": [g.name for g in obj.movie.genres.all()],
             "actors": [
-                f"{actor.first_name} {actor.last_name}"
-                for actor in obj.movie.actors.all()
+                f"{a.first_name} {a.last_name}" for a in obj.movie.actors.all()
             ],
         }
 
     def get_taken_places(self, obj):
         return [
-            {"row": ticket.row, "seat": ticket.seat}
-            for ticket in obj.tickets.all()
+            {"row": t.row, "seat": t.seat}
+            for t in obj.tickets.all()
         ]
 
 
@@ -285,9 +270,10 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         fields = ("id", "tickets")
 
     def create(self, validated_data):
-        tickets_data = validated_data.pop("tickets")
+        tickets_data = validated_data.pop("tickets", [])
         user = self.context["request"].user
         order = Order.objects.create(user=user)
-        for ticket_data in tickets_data:
-            Ticket.objects.create(order=order, **ticket_data)
+        Ticket.objects.bulk_create(
+            [Ticket(order=order, **td) for td in tickets_data]
+        )
         return order
